@@ -70,6 +70,11 @@ public:
   bool is_initialized() final;
 
   void get_metrics(const srsran::srsran_rat_t& rat, phy_metrics_t* m) final;
+  void set_cqi(uint32_t cqi) final
+  {
+    args.cqi_fixed = cqi > 0 ? (int)cqi : -1;
+    nr_workers.set_cqi(cqi);
+  }
   void srsran_phy_logger(phy_logger_level_t log_level, char* str);
 
   void radio_overflow() final;

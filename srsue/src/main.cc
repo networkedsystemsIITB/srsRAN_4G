@@ -38,12 +38,15 @@
 #include <boost/program_options.hpp>
 #include <boost/program_options/parsers.hpp>
 #include <csignal>
+#include <fcntl.h>
 #include <iostream>
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string>
 #include <sys/mman.h>
+#include <sys/stat.h>
+#include <sys/types.h>
 #include <unistd.h>
 
 extern std::atomic<bool> simulate_rlf;
@@ -666,8 +669,67 @@ static int parse_args(all_args_t* args, int argc, char* argv[])
   return SRSRAN_SUCCESS;
 }
 
-static void* input_loop(void*)
+static const char* CQI_FIFO_PATH = "/tmp/srsue_cqi";
+
+static void* cqi_fifo_loop(void* ue_ptr)
 {
+  srsue::ue* ue_inst = static_cast<srsue::ue*>(ue_ptr);
+
+  // Unlink any existing stale FIFO and create new one
+  unlink(CQI_FIFO_PATH);
+  if (mkfifo(CQI_FIFO_PATH, 0666) != 0) {
+    std::cout << "Warning: Failed to create CQI FIFO at " << CQI_FIFO_PATH << ": " << strerror(errno) << std::endl;
+    return nullptr;
+  }
+  std::cout << "CQI FIFO listener active at " << CQI_FIFO_PATH << " (e.g. echo 7 > " << CQI_FIFO_PATH << ")" << std::endl;
+
+  while (running) {
+    int fd = open(CQI_FIFO_PATH, O_RDONLY);
+    if (fd < 0) {
+      if (errno == EINTR) {
+        continue;
+      }
+      break;
+    }
+
+    char buf[64] = {};
+    ssize_t n = read(fd, buf, sizeof(buf) - 1);
+    close(fd);
+
+    if (n > 0 && running) {
+      buf[n] = '\0';
+      std::string s(buf);
+      // Trim whitespace and newlines
+      size_t first = s.find_first_not_of(" \t\r\n");
+      size_t last  = s.find_last_not_of(" \t\r\n");
+      if (first != std::string::npos && last != std::string::npos) {
+        std::string val_str = s.substr(first, last - first + 1);
+        try {
+          int val = std::stoi(val_str);
+          if (val >= 0 && val <= 15) {
+            ue_inst->set_cqi((uint32_t)val);
+            if (val == 0) {
+              std::cout << "[CQI FIFO] Reset CQI to default / dynamic (0)" << std::endl;
+            } else {
+              std::cout << "[CQI FIFO] Set CQI to " << val << std::endl;
+            }
+          } else {
+            std::cout << "[CQI FIFO] Invalid CQI value: " << val << " (allowed: 0-15)" << std::endl;
+          }
+        } catch (const std::exception& e) {
+          std::cout << "[CQI FIFO] Failed to parse CQI input: '" << val_str << "'" << std::endl;
+        }
+      }
+    }
+  }
+
+  unlink(CQI_FIFO_PATH);
+  return nullptr;
+}
+
+static void* input_loop(void* ue_ptr)
+{
+  srsue::ue* ue_inst = static_cast<srsue::ue*>(ue_ptr);
   string key;
   while (running) {
     getline(cin, key);
@@ -691,6 +753,26 @@ static void* input_loop(void*)
       } else if (key == "flush") {
         srslog::flush();
         cout << "Flushed log file buffers" << endl;
+      } else if (key.rfind("cqi", 0) == 0) {
+        std::string val_part = key.substr(3);
+        size_t first = val_part.find_first_not_of(" =\t");
+        if (first != std::string::npos) {
+          try {
+            int val = std::stoi(val_part.substr(first));
+            if (val >= 0 && val <= 15) {
+              if (ue_inst) {
+                ue_inst->set_cqi((uint32_t)val);
+              }
+              cout << "Set CQI to " << val << endl;
+            } else {
+              cout << "Invalid CQI: " << val << " (allowed: 0-15)" << endl;
+            }
+          } catch (...) {
+            cout << "Usage: cqi <0-15>" << endl;
+          }
+        } else {
+          cout << "Usage: cqi <0-15>" << endl;
+        }
       } else if (key == "q") {
         // let the signal handler do the job
         raise(SIGTERM);
@@ -802,7 +884,10 @@ int main(int argc, char* argv[])
   }
 
   pthread_t input;
-  pthread_create(&input, nullptr, &input_loop, &args);
+  pthread_create(&input, nullptr, &input_loop, &ue);
+
+  pthread_t cqi_fifo_thread;
+  pthread_create(&cqi_fifo_thread, nullptr, &cqi_fifo_loop, &ue);
 
   cout << "Attaching UE..." << endl;
   ue.switch_on();
@@ -818,6 +903,9 @@ int main(int argc, char* argv[])
   ue.switch_off();
   pthread_cancel(input);
   pthread_join(input, nullptr);
+  pthread_cancel(cqi_fifo_thread);
+  pthread_join(cqi_fifo_thread, nullptr);
+  unlink(CQI_FIFO_PATH);
   metricshub.stop();
   metrics_file.stop();
   ue.stop();

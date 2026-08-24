@@ -110,6 +110,7 @@ public:
   bool get_metrics(ue_metrics_t* m);
 
   void radio_overflow();
+  void set_cqi(uint32_t cqi);
 
 private:
   // UE consists of a radio, a PHY and a stack element

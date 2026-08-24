@@ -77,6 +77,7 @@ public:
       return workers.get_metrics(*m);
     }
   };
+  void set_cqi(uint32_t cqi) final { workers.set_cqi(cqi); }
   void srsran_phy_logger(phy_logger_level_t log_level, char* str);
 
 private:

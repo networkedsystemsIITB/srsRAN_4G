@@ -92,6 +92,7 @@ int ue::init(const all_args_t& args_)
   phy_args_nr.log                  = args.phy.log;
   phy_args_nr.store_pdsch_ko       = args.phy.nr_store_pdsch_ko;
   phy_args_nr.srate_hz             = args.rf.srate_hz;
+  phy_args_nr.fix_wideband_cqi     = args.phy.cqi_fixed >= 0 ? (uint32_t)args.phy.cqi_fixed : 0;
 
   // init layers
   if (args.phy.nof_lte_carriers == 0) {
@@ -412,6 +413,13 @@ std::string ue::get_build_string()
   std::stringstream ss;
   ss << "Built in " << get_build_mode() << " mode using " << get_build_info() << ".";
   return ss.str();
+}
+
+void ue::set_cqi(uint32_t cqi)
+{
+  if (phy) {
+    phy->set_cqi(cqi);
+  }
 }
 
 } // namespace srsue

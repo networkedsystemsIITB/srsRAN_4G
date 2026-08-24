@@ -72,6 +72,11 @@ public:
    * @param ext_cfo_hz External CFO in Hz
    */
   void set_ul_ext_cfo(float ext_cfo_hz) { phy_state.set_ul_ext_cfo(ext_cfo_hz); }
+
+  /**
+   * @brief Sets fixed wideband CQI at runtime (0 = disabled / default)
+   */
+  void set_cqi(uint32_t cqi) { phy_state.set_cqi(cqi); }
 };
 
 } // namespace nr
